@@ -37,7 +37,7 @@ subject kinds: path | url | host | env | cmd
   path = 引号或 $/盘符起始的绝对路径
   url  = https?:// 直到空白或引号
   host = url 的 hostname
-  env  = 环境变量名引用（env:FOO 或带花括号的形式），长度>=3
+  env  = 【显式】环境变量引用：$env:X / ${env:X} / %X% / printenv X，长度>=3
   cmd  = 删除/移动/覆盖类动词的宾语（解析宾语，不做文本距离）
 ```
 
@@ -45,27 +45,39 @@ subject kinds: path | url | host | env | cmd
 
 ## 3. 规则 DSL
 
-```
-version: 1
-rules:
-  - id: cred-exfil-outbound
-    action_class: net-send
-    reason: 凭据材料出境（载荷或 URL 含凭据形态，且目标是外部主机）
-    when:
-      tool: [pwsh, run_code, web_fetch]
-      subject_kind: [url]
-      subject_re: credential|token|secret|\.ya?ml
-    also:
-      args_re: Invoke-RestMethod|fetch\(|curl|POST|Upload
-    verdict: deny
+```json
+// 真实文件 rules/default.json 里的一条，逐字照抄。
+// 为什么是 JSON 而不是 YAML：形如 credential|token|secret 的正则裸写在 YAML 里，
+// `|` 会被当块标量起始符而静默变形——解析器一错，代价就是误拦或漏拦。
+// JSON 解析失败至少会抛出来；loadRules 还会拒绝未知字段与 verdict:"allow"。
+{
+  "id": "credential-exfil-outbound",
+  "action_class": "net-send",
+  "verdict": "deny",
+  "reason": "把凭据形态的对象发往外部主机。认证头携带不算出境；URL 路径里出现 token 这个词也不算（实测误拦插件页）。",
+  "when": {
+    "subject_kind": [
+      "url"
+    ]
+  },
+  "also": {
+    "subject_credentialish": true,
+    "args_re": "\\b(Invoke-RestMethod|Invoke-WebRequest|curl|wget|fetch|POST|PUT|Upload)\\b"
+  },
+  "unless": {
+    "subject_re": "^(localhost|127\\.0\\.0\\.1|\\[::1\\]|api\\.github\\.com|registry\\.npmjs\\.org|.*\\.dsh-plugin.*|192\\.168\\.|awesome-dsh-plugin\\.com|dshmarket\\.com)"
+  }
+}
 ```
 
 要点：
 
-- `also` 让「出境」必须同时具备「外发动作」，两条都命中才 deny。
-  单凭凭据字样出现在参数里就拦，会把「读取凭据文件」误判成外传。
-- **认证头携带凭据 = 使用授权；凭据出现在载荷 / URL / 异域 = 外传**。两者必须分开判，
-  这是最容易写成误拦的一条（见 `rules/default.yml` 的 `cred-in-header-not-exfil`）。
+- `when` 钉**主体域**（这条只允许 url 类主体参与判定），`also` 里两个谓词**同真**才 deny：
+  既要有凭据形态的对象，又要有外发动词。单凭凭据字样出现在参数里就拦，
+  会把「读取凭据文件」误判成外传（实测就是靠这条区分开的）。
+- **认证头携带凭据 = 使用授权；凭据出现在载荷 / URL / 异域 = 外传**。两者必须分开判。
+- `unless` 是白名单，不是「关掉规则」：localhost / 回环 / 官方注册域 / 内网段命中即不拦。
+  ⚠ 内网段这条有已知代价——发往局域网的外传不设防，见 README「已知边界」。
 
 ## 4. 动作凭证（grant）
 

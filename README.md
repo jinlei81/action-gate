@@ -3,7 +3,8 @@
 给跑在 DeepSeek Harness 上的 agent 挂一道**动作闸门**：工具执行前按确定性规则裁决 allow / deny / review，
 宿主签发的**动作凭证**决定例外，所有裁决进**只追加账本**。
 
-零 LLM、零领域知识、不读任何模型内部状态。规则是人写的 YAML，判据可回放、可复验。
+零 LLM、零领域知识、不读任何模型内部状态。规则是人写的 **JSON**（自写 YAML 解析器一旦误解 = 静默误拦，
+所以宁可丑）；未知字段直接报错，`verdict:"allow"` 被 `loadRules` 拒收（防止某条规则被悄悄解除）。
 
 ## 为什么是它，不是什么
 
@@ -17,9 +18,12 @@
 ## 30 秒跑起来
 
 ```bash
-npm test                    # 引擎判据回归
-node scripts/replay.mjs --corpus fixtures/calls.jsonl   # 拿真实历史调用回放，出误拦/漏拦分布
+node --test test/engine.test.mjs   # 引擎判据回归（31 例）
+node scripts/replay.mjs            # 在【自己的】历史会话上回放，出拦截密度与逐条 deny
 ```
+
+回放默认读 `~/.dsh/sessions/*/session.v4.jsonl.zstd`（`ACTION_GATE_SESSIONS` 可覆盖）。
+**没有附带语料**：拦得对不对只有在你自己的历史调用上跑才算数，别人替你测出来的数字不算。
 
 挂载（DSH profile）：把 `action-gate.patch.yml` 接进你的 profile overlay，运行在该 profile 的
 agent 自动获得 `gate_status` / `gate_explain` / `gate_audit` 三个只读工具与两道写路径闸门。
@@ -29,19 +33,30 @@ agent 自动获得 `gate_status` / `gate_explain` / `gate_audit` 三个只读工
 | 路径 | 内容 |
 |---|---|
 | `docs/DESIGN.md` | 判据语义、规则 DSL、凭证格式（**这份是设计正本**） |
-| `docs/REPLAY.md` | 误拦/漏拦怎么量出来——先有口径再写规则 |
+| `docs/REPLAY.md` | 口径怎么定的、以及哪些指标已被实测证伪（别照抄） |
 | `src/rules.js` | 规则加载 + 谓词匹配（纯函数，无依赖） |
 | `src/engine.js` | 裁决：规则 × 凭证 × 账本 |
 | `src/grant.js` | 宿主侧凭证签发/校验（HMAC，模型不可自签） |
 | `src/ledger.js` | 只追加 JSONL 账本 |
 | `src/index.js` | DSH 插件入口（四个钩子） |
-| `rules/default.yml` | 起步规则集（本机真实踩过的坑写的，非示例） |
+| `rules/default.json` | 起步规则集（10 条，本机真实踩过的坑写的，非示例；无硬编码本机路径） |
+| `scripts/replay.mjs` | 历史调用回放器：多帧 zstd 切帧、按会话目录还原工作区根、阳性对照不过就 exit 3 |
 
 ## 出处与边界
 
 本工程独立编写，未使用任何第三方同型实现的代码。设计动机来自公开可见的一类问题
 （agent 越界动作、护栏不可解释、误拦无人调）；表达、命名、判据、测试均为本仓自有。
 详见 `docs/DESIGN.md` 第 0 节。
+
+## 已知边界（先说坏消息）
+
+- **LAN 目的地被 `unless` 吞掉**：`scp secret.pem → 192.168.3.237` 判 **allow**。
+  白名单里的内网段是为了不误拦本机日常，代价是同一段内的外传不设防。要收紧就把 `192.168.` 从 `unless` 去掉。
+- **`ask` 在 21k 样本上命中 0 次**（只有 `git-push-to-remote` 一条用它）。链路可用，但没有真实分布可验证，别当成已充分测试。
+- **插件挂载路径未在活宿主里验收**：`src/index.js` 的钩子选型（`guard` 只拒不改 / `pre-execute` 返回 `ask`）
+  是对宿主扩展点说明逐条核对过的，但「装上并拦住真动作」这一步本机尚未实测。
+- **规则不是策略完备集**：它是本机踩坑的沉淀，不是通用清单。换一台机器、换一类工作，
+  先用自己历史回放一遍再决定是否常开。
 
 ## 许可
 
