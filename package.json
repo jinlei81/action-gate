@@ -1,0 +1,29 @@
+{
+  "name": "action-gate",
+  "version": "0.1.0",
+  "description": "Deterministic action gate for DeepSeek Harness agents: rule-based allow/deny/review/ask before execution, host-issued grants, append-only ledger.",
+  "type": "module",
+  "main": "./src/index.js",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test test/engine.test.mjs",
+    "replay": "node scripts/replay.mjs",
+    "grant": "node scripts/issue-grant.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./action-gate.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  }
+}

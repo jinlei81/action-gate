@@ -1,0 +1,10 @@
+# action-gate 插件叠加补丁（DSH profile overlay）
+# 用法：把本条目并入你的 profile 补丁，或
+#   dsh --profile <p> --patch ./action-gate.patch.yml "任务"
+plugins:
+  - id: action-gate
+    name: 'action-gate'
+    enabled: true
+    config:
+      # 判据/账本位置可用环境变量覆盖（ACTION_GATE_RULES / ACTION_GATE_LEDGER）
+      rules: './rules/default.json'

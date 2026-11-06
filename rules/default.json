@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "credential-exfil-outbound",
+      "action_class": "net-send",
+      "verdict": "deny",
+      "reason": "把凭据形态的对象发往外部主机。认证头携带不算出境；URL 路径里出现 token 这个词也不算（实测误拦插件页）。",
+      "when": {
+        "subject_kind": [
+          "url"
+        ]
+      },
+      "also": {
+        "subject_credentialish": true,
+        "args_re": "\\b(Invoke-RestMethod|Invoke-WebRequest|curl|wget|fetch|POST|PUT|Upload)\\b"
+      },
+      "unless": {
+        "subject_re": "^(localhost|127\\.0\\.0\\.1|\\[::1\\]|api\\.github\\.com|registry\\.npmjs\\.org|.*\\.dsh-plugin.*|192\\.168\\.|awesome-dsh-plugin\\.com|dshmarket\\.com)"
+      }
+    },
+    {
+      "id": "destructive-target-outside-workspace",
+      "action_class": "destroy",
+      "verdict": "deny",
+      "reason": "删除/移动宾语解析成绝对路径且确在工作区与临时目录之外。必须有正面证据才 deny。",
+      "when": {
+        "subject_kind": [
+          "destroy-target"
+        ]
+      },
+      "also": {
+        "subject_outside": true
+      }
+    },
+    {
+      "id": "destructive-target-unresolved",
+      "action_class": "destroy",
+      "verdict": "review",
+      "reason": "删除宾语是变量或未解析形态，说不清删到哪。判据不完备⇒交人，不猜着拦（实测这类占误拦大头）。",
+      "when": {
+        "subject_kind": [
+          "destroy-target"
+        ]
+      },
+      "also": {
+        "subject_unresolved": true
+      }
+    },
+    {
+      "id": "recursive-delete-root-shape",
+      "action_class": "destroy",
+      "verdict": "deny",
+      "reason": "递归删除的宾语是根形态（盘根/家目录/系统树）。根形态判定走路径语义，不靠正则堆。",
+      "when": {
+        "args_re": "\\b(rm\\s+-[a-zA-Z]*[rR]|Remove-Item[^\\n]*-Recurse|rmdir|del\\s+/[sS]|shred)"
+      },
+      "also": {
+        "subject_kind": [
+          "destroy-target",
+          "path"
+        ],
+        "subject_rootish": true
+      }
+    },
+    {
+      "id": "host-config-write-tool",
+      "action_class": "config-write",
+      "verdict": "review",
+      "reason": "write/edit 的落点本身是宿主行为性配置（补丁、凭据文件、AGENTS.md、profile 下 package/cordis）。改这些影响后续所有会话，交人确认。",
+      "when": {
+        "tool": [
+          "write",
+          "edit"
+        ],
+        "subject_kind": [
+          "path"
+        ]
+      },
+      "also": {
+        "subject_re": "(^|[/\\\\])(cordis[.]patch[.]yml|config[.]ya?ml|[.]credentials[.]ya?ml|AGENTS([.]local)?[.]md|settings[.]json|package[.]json)$|[/\\\\]profiles[/\\\\][^/\\\\]+[/\\\\]|[/\\\\][.]dsh[/\\\\][^/\\\\]+[.](ya?ml|json|toml)$|^HK(CU|LM)"
+      },
+      "unless": {
+        "subject_re": "[/\\\\](sessions|node_modules|dsh-runtimes|snapshots|history|cache|logs|backup)[/\\\\]|session[.]v4|[.]jsonl"
+      }
+    },
+    {
+      "id": "host-config-write-shell",
+      "action_class": "config-write",
+      "verdict": "review",
+      "reason": "shell/代码里对宿主行为性配置下写动词。只提到路径不算——实测 7407 次调用提到这些形态，真写的只有 236 次，所以必须动词+宾语同时成立。",
+      "when": {
+        "tool": [
+          "pwsh",
+          "run_code"
+        ],
+        "subject_kind": [
+          "path"
+        ]
+      },
+      "also": {
+        "args_re": "\\b(Set-Content|Add-Content|Out-File|writeFileSync|WriteAllText|Set-ItemProperty|New-ItemProperty|setx|New-Item|Copy-Item|Move-Item|Remove-Item)\\b",
+        "subject_re": "(^|[/\\\\])(cordis[.]patch[.]yml|config[.]ya?ml|[.]credentials[.]ya?ml|AGENTS([.]local)?[.]md|settings[.]json|package[.]json)$|[/\\\\]profiles[/\\\\][^/\\\\]+[/\\\\]|[/\\\\][.]dsh[/\\\\][^/\\\\]+[.](ya?ml|json|toml)$|^HK(CU|LM)"
+      },
+      "unless": {
+        "subject_re": "[/\\\\](sessions|node_modules|dsh-runtimes|snapshots|history|cache|logs|backup)[/\\\\]|session[.]v4|[.]jsonl"
+      }
+    },
+    {
+      "id": "git-push-to-remote",
+      "action_class": "net-send",
+      "verdict": "ask",
+      "reason": "推送到远端会公开内容。本机纪律：资产归档只准本地 git，不外推。",
+      "when": {
+        "args_re": "\\bgit\\s+push\\b"
+      }
+    },
+    {
+      "id": "credential-file-direct-read",
+      "action_class": "cred-read",
+      "verdict": "review",
+      "reason": "直接读凭据文件本体（只看路径类主体；命令里出现环境变量名不算，那是 env-secret-echo 的职责）。旧 PAT 进日志 40 次的根因就是读它——命中行原文会被另存一份并随后续请求上行。",
+      "when": {
+        "tool": [
+          "read",
+          "pwsh",
+          "run_code"
+        ],
+        "subject_kind": [
+          "path",
+          "destroy-target"
+        ]
+      },
+      "also": {
+        "subject_credentialish": true
+      }
+    },
+    {
+      "id": "env-secret-echo",
+      "action_class": "cred-read",
+      "verdict": "deny",
+      "reason": "打印【显式】凭据环境变量的值（$env:X / %X%，会进事件账并随后续请求上行）。只报长度或形状不算。",
+      "when": {
+        "subject_kind": [
+          "env"
+        ],
+        "subject_credentialish": true
+      },
+      "also": {
+        "args_re": "\\b(echo|Write-Output|Write-Host|println|console\\.log|print|Get-Item|format|Out-String)\\b"
+      },
+      "unless": {
+        "args_re": "\\.(Length|Count|Substring\\(0,\\s*6\\))|sha\\d*|fingerprint|\\-NoNewline\\s*\\)?\\s*\\$t\\.Length|长度|形状|\\btest-key\\b"
+      }
+    },
+    {
+      "id": "env-secret-echo-implicit",
+      "action_class": "cred-read",
+      "verdict": "review",
+      "reason": "echo 了大写的 $NAME 且名字像凭据。bash 里分不清它是环境变量还是局部变量 ⇒ 判据不完备，交人，不猜着拦。",
+      "when": {
+        "subject_kind": [
+          "env-implicit"
+        ],
+        "subject_credentialish": true
+      },
+      "also": {
+        "args_re": "\\b(echo|Write-Output|Write-Host|println|console\\.log|print|printf|env|export -p|set\\b|Out-String)\\b"
+      },
+      "unless": {
+        "args_re": "\\.(Length|Count)|sha\\d*|fingerprint|长度|形状|\\btest-key\\b"
+      }
+    }
+  ]
+}

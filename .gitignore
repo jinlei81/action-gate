@@ -1,0 +1,11 @@
+node_modules/
+.action-gate/
+*.log
+.DS_Store
+# 签发密钥绝不进仓
+grant.key
+.env
+
+# 回放在本地产生的裁决账本（含本机绝对路径，绝不入库）
+.replay-ledger.jsonl
+.replay-ledger.jsonl*
