@@ -38,6 +38,7 @@ agent 自动获得 `gate_status` / `gate_explain` / `gate_audit` 三个只读工
 |---|---|
 | `docs/DESIGN.md` | 判据语义、规则 DSL、凭证格式（**这份是设计正本**） |
 | `docs/REPLAY.md` | 口径怎么定的、以及哪些指标已被实测证伪（别照抄） |
+| `docs/LIVEHOST.md` | 活宿主真拦实测记录：挂载方式、被拦原文、以及两条恒 0 命中的规则为什么是坏了而非没遇到 |
 | `src/rules.js` | 规则加载 + 谓词匹配（纯函数，无依赖） |
 | `src/engine.js` | 裁决：规则 × 凭证 × 账本 |
 | `src/grant.js` | 宿主侧凭证签发/校验（HMAC，模型不可自签） |
