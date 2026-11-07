@@ -55,9 +55,14 @@ agent 自动获得 `gate_status` / `gate_explain` / `gate_audit` 三个只读工
 
 ## 已知边界（先说坏消息）
 
-- **LAN 目的地被 `unless` 吞掉**：`scp secret.pem → 192.168.3.237` 判 **allow**。
-  白名单里的内网段是为了不误拦本机日常，代价是同一段内的外传不设防。要收紧就把 `192.168.` 从 `unless` 去掉。
-- **`ask` 只有 4/21k 命中**（全来自 `git-push-to-remote`）。实测：会话里没有审批通道时，宿主把它
+- **`credential-exfil-outbound` 的白名单整块是死码（2026-11-07 实测，7/7 分支全部无效）**。
+  `when.subject_kind` 只放行 url 主体参与判定，而 url 主体的值是 `http://192.168.3.237/x` 这种**带 scheme 的整串**；
+  `unless` 的正则用 `^(localhost|127\.0\.0\.1|…|192\.168\.|…)` 锚定域名 ⇒ 一条都匹不上。
+  实测后果：带 `?api_key=值` 的出境命令发往 localhost / api.github.com / registry.npmjs.org /
+  插件域名 / 192.168.\* / 公网，**一律 deny**（含文档里写「实测误拦插件页」那条 —— 它的出口当时也没生效）。
+  修法一行：把 `unless.subject_kind` 设成 `["url","host"]`（`host` 主体是纯域名，已在抽取层生成）。
+  ⇒ **本条只记录、未改规则**：改成哪种放行范围（整段内网 / 只 237 / 保持严格）等用户定。
+- **`ask` 命中 8/21.4k**（全来自 `git-push-to-remote`；逐条上限原先硬编码 25，会把「某规则 0 命中」的三种成因混成一个 —— 已加 `ACTION_GATE_DENY_RULE` / `DENY_LIMIT`）。实测：会话里没有审批通道时，宿主把它
   变成硬失败 —— `tool pwsh requires approval, but no approval channel is available`，命令一次都没进进程。
   ⇒ 在无审批通道的会话里常开，这条会把所有 `git push` 变成失败，而不是「问一句」。
 - **真拦已在活宿主实测**（2026-11-07）：独立 profile + 第二个进程装上后，`Write-Host $env:AG_DUMMY_SECRET`

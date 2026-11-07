@@ -219,7 +219,10 @@ export function insideAny(candidate, roots) {
 const DEVICE_SINK = new Set(["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr",
   "/dev/zero", "/dev/random", "/dev/urandom", "nul", "\\/.\\/nul"]);
 export function isDeviceSink(v) {
-  const s = String(v || "").trim().toLowerCase().replace(/^['"]|['"]$/g, "");
+  // PATH_UNIX 的字符类不排斥 ) ; , } ⇒ 真主体常是 /dev/null); 这种带尾随标点的形态
+  // （回放里 recursive-delete-root-shape 就有 7 条如此）。只剥引号会漏，必须连尾随标点一起剥。
+  let s = String(v || "").trim().toLowerCase().replace(/^['"]+|['"]+$/g, "");
+  s = s.replace(/[)\]},;]+$/g, "").replace(/[\\/]+$/g, "");
   if (!s) return false;
   return DEVICE_SINK.has(s) || DEVICE_SINK.has(s.replace(/\\/g, "/"));
 }

@@ -183,6 +183,20 @@ test("嵌套参数同样解析", () => {
   assert.equal(d.verdict, "deny");
 });
 
+// 已知边界（README「exfil 白名单是死码」）：when.subject_kind 只放 url 主体，
+// url 值带 scheme ⇒ unless 的 ^域名 一条匹不上。现状=任何目的地一律 deny。
+// 这两条钉的是【现状】：若日后按用户选择修好白名单，第一条必须跟着改成新语义，不许悄悄红着。
+test("现状钉：exfil 白名单未生效，localhost 出境也 deny", () => {
+  const d = D("pwsh", "curl -X POST http://localhost:34275/x?api_key=abc");
+  assert.equal(d.verdict, "deny");
+  assert.equal(d.rule && d.rule.rule_id, "credential-exfil-outbound");
+});
+test("修法前置：host 主体确为纯域名（白名单该作用在它上面）", () => {
+  const ex = extractSubjects({ tool: "pwsh", args: { command: "curl -X POST http://192.168.3.237:8642/x?api_key=abc" } });
+  const hosts = ex.filter((x) => x.kind === "host").map((x) => x.value);
+  assert.ok(hosts.includes("192.168.3.237"), "host 主体= " + JSON.stringify(hosts));
+});
+
 test("只读面不产生授权也不消耗配额", () => {
   const tok = issueGrant({ cls: "destroy", scope_prefix: "C:" + B + "Users", uses: 1, exp: Date.now() + 60000 });
   const e = createEngine({ rules, grants: [tok], ledgerFile: path.join(TMP, "ro.jsonl") });

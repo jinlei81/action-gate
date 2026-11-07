@@ -19,6 +19,11 @@ import { createEngine } from "../src/engine.js";
 const SESSIONS = process.env.ACTION_GATE_SESSIONS ||
   path.join(os.homedir(), ".dsh", "sessions");
 const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]);
+// 逐条打印原先硬上限 25，于是「某规则看起来 0 命中」有三种成因根本分不开
+// （本机实测栽过一次：exfil 有 4 条命中，但前 25 条被别的规则占满）。
+const DENY_LIMIT = Number(process.env.ACTION_GATE_DENY_LIMIT || 25);
+const DENY_RULE = process.env.ACTION_GATE_DENY_RULE || "";
+const subjectShapes = {};
 
 function decodeAll(buf) {
   const out = []; let off = 0;
@@ -139,7 +144,14 @@ for (const fp of walk(SESSIONS)) {
       verdicts[dec.verdict] = (verdicts[dec.verdict] || 0) + 1;
       if (dec.verdict !== "allow") {
         perRule[dec.rule.rule_id] = (perRule[dec.rule.rule_id] || 0) + 1;
-        if (dec.verdict === "deny" && denyRows.length < 25) denyRows.push({ call, dec });
+        const rid = dec.rule.rule_id;
+        const sh = (subjectShapes[rid] = subjectShapes[rid] || { deny: 0, junk: 0, kinds: {} });
+        sh.deny++;
+        const vv = String((dec.rule.subject && dec.rule.subject.value) || "");
+        if (!vv || /^["'\\\s]+$/.test(vv)) sh.junk++;
+        const kk = (dec.rule.subject && dec.rule.subject.kind) || "n/a";
+        sh.kinds[kk] = (sh.kinds[kk] || 0) + 1;
+        if ((!DENY_RULE || rid === DENY_RULE) && denyRows.length < DENY_LIMIT) denyRows.push({ call, dec });
       }
       if (!controlHit) {
         try { if (eng.decide(CONTROL).verdict !== "allow") controlHit = true; } catch { /* 对照失败留给出口码 */ }
@@ -170,6 +182,12 @@ for (const r of denyRows) {
   console.log("   理由: " + String(r.dec.rule.reason || r.dec.message).slice(0, 90));
   console.log("   命令: " + body);
 }
+console.log("\n=== 逐规则主体形态（口径=非 allow 命中，含 review/ask；不受 25 条打印上限影响）===");
+for (const id of Object.keys(subjectShapes)) {
+  const v = subjectShapes[id];
+  console.log("· " + id + "  非allow命中=" + v.deny + "  空或纯引号反斜杠主体=" + v.junk + "  kinds=" + JSON.stringify(v.kinds));
+}
+
 if (!controlHit) {
   console.log("\n阳性对照=FAIL  仪器看不见已知应拦的命令 ⇒ 以上 0 与低密度一律不作数");
   process.exit(3);
