@@ -82,6 +82,13 @@ want("本地 commit 放行", "pwsh", "git commit -m x", "allow");
 want("删工作区外 Downloads deny", "pwsh", "del C:" + B + "Users" + B + "huawei" + B + "Downloads" + B + "old.zip", "deny", "destructive-target-outside-workspace");
 want("打印凭据环境变量 deny", "pwsh", "echo $env:GITHUB_TOKEN", "deny", "env-secret-echo");
 want("git push 为 ask", "pwsh", "git push origin main", "ask", "git-push-to-remote");
+  // 裸 $NAME 分不清环境变量还是局部变量 ⇒ 只许 review。这条曾因 isCredentialish2
+  // 缺 env-implicit 分支而【结构上永不可能命中】（回放里 0 命中），必须钉住。
+  want("裸大写凭据名变量为 review", "pwsh", "echo $GITHUB_TOKEN", "review", "env-secret-echo-implicit");
+  want("裸普通变量不算凭据", "pwsh", "echo $PATH", "allow");
+  // 设备结点不是删除目标：2>/dev/null 极常见，旧实现据此造出假 deny。
+  want("重定向到 /dev/null 不算根形态", "pwsh",
+    "rm -rf " + WS + B + "probe" + " 2>/dev/null", "allow");
 // 配置写已按 tool/shell 拆成两条：钉死单条 id 等于把规则表当规格，这里锁语义与归属集合
 want("写宿主补丁配置为 review", "pwsh",
   "Set-Content -Path C:" + B + "Users" + B + "huawei" + B + ".dsh" + B + "profiles" + B + "desktop" + B + "cordis.patch.yml -Value x",

@@ -18,7 +18,7 @@
 ## 30 秒跑起来
 
 ```bash
-node --test test/engine.test.mjs   # 引擎判据回归（31 例）
+node --test test/engine.test.mjs   # 引擎判据回归（34 例）
 node scripts/replay.mjs            # 在【自己的】历史会话上回放，出拦截密度与逐条 deny
 ```
 
@@ -27,6 +27,10 @@ node scripts/replay.mjs            # 在【自己的】历史会话上回放，�
 
 挂载（DSH profile）：把 `action-gate.patch.yml` 接进你的 profile overlay，运行在该 profile 的
 agent 自动获得 `gate_status` / `gate_explain` / `gate_audit` 三个只读工具与两道写路径闸门。
+
+钩子选型不是照着文档猜的：`guard` 必须回【字符串】（回对象会渲染成 `[object Object]`）、
+`ask` 的字段名是 `reason` 不是 `question`、工具定义必须带 `output.render`（缺了整条插件
+静默不激活）。三个坑都在 `src/index.js` 头部注释里留了记录。
 
 ## 目录
 
@@ -38,7 +42,7 @@ agent 自动获得 `gate_status` / `gate_explain` / `gate_audit` 三个只读工
 | `src/engine.js` | 裁决：规则 × 凭证 × 账本 |
 | `src/grant.js` | 宿主侧凭证签发/校验（HMAC，模型不可自签） |
 | `src/ledger.js` | 只追加 JSONL 账本 |
-| `src/index.js` | DSH 插件入口（四个钩子） |
+| `src/index.js` | DSH 插件入口：`guard` + `tools/pre-execute` + `tools/result` 三个钩子、三个只读工具 |
 | `rules/default.json` | 起步规则集（10 条，本机真实踩过的坑写的，非示例；无硬编码本机路径） |
 | `scripts/replay.mjs` | 历史调用回放器：多帧 zstd 切帧、按会话目录还原工作区根、阳性对照不过就 exit 3 |
 
@@ -52,9 +56,12 @@ agent 自动获得 `gate_status` / `gate_explain` / `gate_audit` 三个只读工
 
 - **LAN 目的地被 `unless` 吞掉**：`scp secret.pem → 192.168.3.237` 判 **allow**。
   白名单里的内网段是为了不误拦本机日常，代价是同一段内的外传不设防。要收紧就把 `192.168.` 从 `unless` 去掉。
-- **`ask` 在 21k 样本上命中 0 次**（只有 `git-push-to-remote` 一条用它）。链路可用，但没有真实分布可验证，别当成已充分测试。
-- **插件挂载路径未在活宿主里验收**：`src/index.js` 的钩子选型（`guard` 只拒不改 / `pre-execute` 返回 `ask`）
-  是对宿主扩展点说明逐条核对过的，但「装上并拦住真动作」这一步本机尚未实测。
+- **`ask` 只有 4/21k 命中**（全来自 `git-push-to-remote`）。实测：会话里没有审批通道时，宿主把它
+  变成硬失败 —— `tool pwsh requires approval, but no approval channel is available`，命令一次都没进进程。
+  ⇒ 在无审批通道的会话里常开，这条会把所有 `git push` 变成失败，而不是「问一句」。
+- **真拦已在活宿主实测**（2026-11-07）：独立 profile + 第二个进程装上后，`Write-Host $env:AG_DUMMY_SECRET`
+  被 `env-secret-echo` 挡在执行之前，闸门理由原样回到会话里；同轮的良性调用照旧放行。
+  ⚠ 宿主【重启才会】重新 require 插件：改完 `src/index.js` 不重启，跑的还是旧版。
 - **规则不是策略完备集**：它是本机踩坑的沉淀，不是通用清单。换一台机器、换一类工作，
   先用自己历史回放一遍再决定是否常开。
 

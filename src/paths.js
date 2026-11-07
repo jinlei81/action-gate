@@ -133,7 +133,11 @@ function nameIsCred(base) {
 export function isCredentialish2(kind, value) {
   const v = String(value || "");
   if (!v) return false;
-  if (kind === "env") {
+  // env = 显式（$env:X / %X%）；env-implicit = bash 裸 $NAME。两者主体值都是【变量名】，
+  // 判据同一条：名字像凭据即可。旧实现漏了 env-implicit 分支 ⇒ 落到函数末尾 return false，
+  // 于是规则 env-secret-echo-implicit 结构上永不可能命中（回放里 0 命中不是数据凑巧）。
+  // 差别只在【裁决强度】交给规则层：显式可 deny，裸名只许 review。
+  if (kind === "env" || kind === "env-implicit") {
     const up = v.toUpperCase();
     if (credKeyToken(up)) return true;
     return false;

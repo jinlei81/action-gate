@@ -143,6 +143,10 @@ export function isRootish(value) {
   const raw = String(value == null ? "" : value).trim().replace(/^["']+|["']+$/g, "").replace(/\s+/g, "");
   if (!raw) return false;
   const s = raw.toLowerCase();
+  // 重定向设备结点是【丢弃输出】的目标，不是删除目标：`2>/dev/null` 在真实命令里极常见，
+  // 而 /dev 落在 SYS_TREE ⇒ 旧实现把每条带 2>/dev/null 的递归删除都判成根形态（回放里 31 条）。
+  // destroyTargets 早已排除设备结点，isRootish 这条路径漏了。
+  if (isDeviceSink(s)) return false;
   if (/^[a-z]:[\\/]?$/.test(s)) return true;                        // C:  C:\  C:/
   if (s === "/" || s === "//" || s === "~" || s === "~/" || s === "*" || s === "./") return true;
   if (s === "$home" || s === "%userprofile%" || s === "$env:userprofile") return true;
