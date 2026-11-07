@@ -67,6 +67,11 @@ agent 自动获得 `gate_status` / `gate_explain` / `gate_audit` 三个只读工
 - **`ask` 命中 8/21.4k**（全来自 `git-push-to-remote`；逐条上限原先硬编码 25，会把「某规则 0 命中」的三种成因混成一个 —— 已加 `ACTION_GATE_DENY_RULE` / `DENY_LIMIT`）。实测：会话里没有审批通道时，宿主把它
   变成硬失败 —— `tool pwsh requires approval, but no approval channel is available`，命令一次都没进进程。
   ⇒ 在无审批通道的会话里常开，这条会把所有 `git push` 变成失败，而不是「问一句」。
+- **无审批通道时，宿主会把闸门的理由换成它自己的通用文案**（读 `pipeline.js` 的 `serviceAsk` 核过：
+  只有 approval 服务【缺席】那条分支保留 `ask.reason`；`unavailable` 与「无 agent 路由」两支丢掉）。
+  拒绝路径不走 `post-execute`，事后补不了 ⇒ 本包的做法是【学会】这件事：撞到一次就把本会话的
+  `ask`/`review` 直发成 `deny`，理由走正规 `denialReason` 通道（`docs/LIVEHOST.md` 有三连实测原文）。
+  代价：降级后不再真的问人，即便通道后来出现。
 - **真拦已在活宿主实测**（2026-11-07）：独立 profile + 第二个进程装上后，`Write-Host $env:AG_DUMMY_SECRET`
   被 `env-secret-echo` 挡在执行之前，闸门理由原样回到会话里；同轮的良性调用照旧放行。
   ⚠ 宿主【重启才会】重新 require 插件：改完 `src/index.js` 不重启，跑的还是旧版。

@@ -18,6 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadRules } from "./rules.js";
 import { createEngine } from "./engine.js";
+import { isApprovalUnavailableText, askKindFor } from "./approval.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_RULES = process.env.ACTION_GATE_RULES || path.join(HERE, "..", "rules", "default.json");
@@ -62,11 +63,17 @@ export async function apply(ctx, config = {}) {
 
   // ② 需要问人的裁决：guard 表达不出来，走 waterfall。
   // deny 在这里也返回一次，是为了让【拒绝理由】作为正规决策进入会话，而不只是事后错误文本。
+  // ASKED 记下我们提出过 ask 的 callId —— 只有【我们自己问的】那次撞墙才算降级证据，
+  // 别的原因（别的插件的 ask、宿主审批策略）不得把闸门的文案改掉。
+  let noChannel = false;
+  const ASKED = new Set();
   ctx.on("tools/pre-execute", async (exec, next) => {
     const d = decideOnce(exec);
     if (d.verdict === "deny") return { kind: "deny", reason: d.message };
-    if (d.verdict === "ask" || d.verdict === "review") return { kind: "ask", reason: d.message };
-    return next();
+    const kind = askKindFor(d.verdict, noChannel);
+    if (!kind) return next();
+    if (kind === "ask") { if (exec && exec.callId) ASKED.add(exec.callId); return { kind: "ask", reason: d.message }; }
+    return { kind: "deny", reason: d.message + "（本机无审批通道，ask 会变成看不理由的硬失败，故按 deny 直发以保留解释）" };
   });
 
   // ③ 三个只读自查工具：可查、可解释，结构上不产生授权（没有任何写路径）。
@@ -84,7 +91,7 @@ export async function apply(ctx, config = {}) {
 
   reg("gate_status",
     "查当前动作闸门状态：生效规则 id、在线凭证（cls/scope/剩余次数）、账本路径。只读，不授权。",
-    {}, null, () => engine.status());
+    {}, null, () => Object.assign({ approvalChannel: noChannel ? "unavailable(ask 已降级为 deny)" : "unknown(尚未撞到)" }, engine.status()));
 
   reg("gate_explain",
     "对一次【假想】动作跑闸门并返回完整求值轨迹（每条规则为何命中/未命中）。用于自查与调判据；不执行该动作、不落账、不授权。",
@@ -98,6 +105,19 @@ export async function apply(ctx, config = {}) {
 
   // ④ 观察面 ≠ 授权面：执行结果只入账，永不参与裁决。
   ctx.on("tools/result", (exec, result) => {
+    const id = exec && exec.callId;
+    // 学会「本机没有审批通道」：只认我们提出过 ask 的那次调用，且失败文案必须是审批类通用文案。
+    if (result && result.isError && id && ASKED.has(id)) {
+      const msg = (result.error && result.error.message) ||
+        (Array.isArray(result.content) && result.content[0] && result.content[0].text) || "";
+      if (isApprovalUnavailableText(msg)) {
+        noChannel = true;
+        const note = { verdict: "observed", stage: "approval-unavailable", tool: exec && exec.name };
+        if (engine.ledger) engine.ledger.append(note);
+        ctx.logger?.warn?.("[action-gate] 本会话无审批通道：ask/review 之后按 deny 直发以保留闸门理由");
+      }
+      ASKED.delete(id);
+    }
     if (result && result.isError && engine.ledger) {
       engine.ledger.append({ verdict: "observed", stage: "post-failure", tool: exec && exec.name });
     }

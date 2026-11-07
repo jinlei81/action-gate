@@ -7,6 +7,7 @@ import { loadRules } from "../src/rules.js";
 import { createEngine } from "../src/engine.js";
 import { issueGrant, verifyGrant } from "../src/grant.js";
 import { extractSubjects, destroyTargets, isRootish } from "../src/subjects.js";
+import { isApprovalUnavailableText, askKindFor } from "../src/approval.js";
 
 // 夹具里的反斜杠一律运行时构造（本文件正文一个反斜杠都没有）：
 // 多层转义把夹具本身写错，正是本项目踩过的那类坑。
@@ -186,13 +187,31 @@ test("嵌套参数同样解析", () => {
 // 已知边界（README「exfil 白名单是死码」）：when.subject_kind 只放 url 主体，
 // url 值带 scheme ⇒ unless 的 ^域名 一条匹不上。现状=任何目的地一律 deny。
 // 这两条钉的是【现状】：若日后按用户选择修好白名单，第一条必须跟着改成新语义，不许悄悄红着。
-test("现状钉：exfil 白名单未生效，localhost 出境也 deny", () => {
+test("现状钉：exfil 白名单 6/7 支未生效，localhost 出境仍 deny", () => {
   const d = D("pwsh", "curl -X POST http://localhost:34275/x?api_key=abc");
   assert.equal(d.verdict, "deny");
   assert.equal(d.rule && d.rule.rule_id, "credential-exfil-outbound");
 });
 // 白名单里唯一活着的一支（前导 .* 吞掉 scheme）。删掉整块 unless 会让它由 allow 变 deny，
 // 是真实回归（本机实测踩过）⇒ 这条钉住它，防止下次「清理死码」顺手把它带走。
+// src/approval.js 的降级判据：只认「无审批通道/无 agent 路由」两类宿主通用文案。
+// 判宽了＝别的原因（人明确拒绝、沙箱拒绝）也会把闸门的 ask 永久改成 deny，那是自伤。
+test("approval 降级判据：只认无通道与无 agent 两种文案", () => {
+  assert.equal(isApprovalUnavailableText("tool pwsh requires approval, but no approval channel is available"), true);
+  assert.equal(isApprovalUnavailableText("tool pwsh requires approval, but the call has no agent to route it through"), true);
+  assert.equal(isApprovalUnavailableText("the user rejected tool pwsh"), false, "人明确拒绝不算无通道");
+  assert.equal(isApprovalUnavailableText("approval for tool pwsh was cancelled"), false);
+  assert.equal(isApprovalUnavailableText("sandbox: file access denied under workspace-write mode"), false);
+  assert.equal(isApprovalUnavailableText(""), false);
+});
+test("approval 降级形状：有通道仍 ask，无通道转 deny，deny/allow 不经这里", () => {
+  assert.equal(askKindFor("review", false), "ask");
+  assert.equal(askKindFor("ask", false), "ask");
+  assert.equal(askKindFor("review", true), "deny");
+  assert.equal(askKindFor("deny", true), null, "deny 由 guard/直发处理");
+  assert.equal(askKindFor("allow", true), null);
+});
+
 test("钉住：*.dsh-plugin.* 出境仍放行（白名单唯一活的分支）", () => {
   const d = D("pwsh", "curl -X POST https://plugins.dsh-plugin.dev/x?api_key=abc");
   assert.equal(d.verdict, "allow", "实际 " + d.verdict + " / " + (d.rule && d.rule.rule_id));
